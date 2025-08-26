@@ -138,8 +138,22 @@ export class AIInvestmentService {
     const remainingAllocation = 100 - equity;
     const debt = Math.round(remainingAllocation * 0.6);
     const gold = Math.round(remainingAllocation * 0.25);
-    const international = Math.round(Math.min(15, equity * 0.15));
+    const international = Math.round(Math.min(10, equity * 0.1)); // Reduced from 15% to 10%
     const cash = Math.max(0, remainingAllocation - debt - gold - international);
+    
+    // Ensure allocation sums to exactly 100%
+    const totalAllocation = equity + debt + gold + international + cash;
+    if (totalAllocation !== 100) {
+      // Adjust cash to make total exactly 100%
+      const adjustment = 100 - totalAllocation;
+      return { 
+        equity, 
+        debt, 
+        gold, 
+        international, 
+        cash: Math.max(0, cash + adjustment) 
+      };
+    }
 
     return { equity, debt, gold, international, cash };
   }
@@ -160,16 +174,44 @@ export class AIInvestmentService {
       
       // Large cap stocks (50% of equity)
       const largeCap = this.selectTopStocks(marketData, 'large', equityAmount * 0.5, preferredSectors, avoidSectors, profile.preferences.esgPreference);
+      // Distribute allocation equally among selected large cap stocks
+      const largeCapAllocation = (allocation.equity * 0.5) / Math.max(largeCap.length, 1);
+      largeCap.forEach(stock => {
+        stock.allocation = largeCapAllocation;
+        stock.investmentAmount = (equityAmount * 0.5) / Math.max(largeCap.length, 1);
+      });
       instruments.push(...largeCap);
       
       // Mid cap stocks (30% of equity)
       const midCap = this.selectTopStocks(marketData, 'mid', equityAmount * 0.3, preferredSectors, avoidSectors, profile.preferences.esgPreference);
+      // Distribute allocation equally among selected mid cap stocks
+      const midCapAllocation = (allocation.equity * 0.3) / Math.max(midCap.length, 1);
+      midCap.forEach(stock => {
+        stock.allocation = midCapAllocation;
+        stock.investmentAmount = (equityAmount * 0.3) / Math.max(midCap.length, 1);
+      });
       instruments.push(...midCap);
       
       // Small cap stocks (20% of equity) - for moderate and aggressive investors
       if (riskTolerance !== 'conservative') {
         const smallCap = this.selectTopStocks(marketData, 'small', equityAmount * 0.2, preferredSectors, avoidSectors, profile.preferences.esgPreference);
+        // Distribute allocation equally among selected small cap stocks
+        const smallCapAllocation = (allocation.equity * 0.2) / Math.max(smallCap.length, 1);
+        smallCap.forEach(stock => {
+          stock.allocation = smallCapAllocation;
+          stock.investmentAmount = (equityAmount * 0.2) / Math.max(smallCap.length, 1);
+        });
         instruments.push(...smallCap);
+      } else {
+        // For conservative investors, allocate the remaining 20% to large cap
+        const remainingLargeCap = this.selectTopStocks(marketData, 'large', equityAmount * 0.2, preferredSectors, avoidSectors, profile.preferences.esgPreference);
+        // Distribute allocation equally among selected large cap stocks
+        const remainingLargeCapAllocation = (allocation.equity * 0.2) / Math.max(remainingLargeCap.length, 1);
+        remainingLargeCap.forEach(stock => {
+          stock.allocation = remainingLargeCapAllocation;
+          stock.investmentAmount = (equityAmount * 0.2) / Math.max(remainingLargeCap.length, 1);
+        });
+        instruments.push(...remainingLargeCap);
       }
     }
 
@@ -242,9 +284,9 @@ export class AIInvestmentService {
 
   private selectTopStocks(marketData: MarketInstrument[], capSize: 'large' | 'mid' | 'small', amount: number, preferredSectors?: string[], avoidSectors?: string[], esgPreference?: boolean): RecommendedInstrument[] {
     const stockCategories = {
-      large: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'HINDUNILVR', 'WIPRO', 'AXISBANK', 'SUNPHARMA', 'MARUTI'],
+      large: ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'HINDUNILVR', 'WIPRO', 'AXISBANK', 'SUNPHARMA', 'MARUTI', 'ITC'],
       mid: ['LT', 'ASIANPAINT', 'KOTAKBANK', 'BHARTIARTL', 'SBIN', 'TATAMOTORS', 'NESTLEIND', 'ULTRACEMCO', 'TECHM', 'BAJFINANCE'],
-      small: ['ITC', 'ADANIPORTS', 'POWERGRID', 'TATACONSUM', 'HCLTECH', 'BRITANNIA', 'SHREECEM', 'JSWSTEEL', 'TATASTEEL', 'COALINDIA']
+      small: ['ADANIPORTS', 'POWERGRID', 'TATACONSUM', 'HCLTECH', 'BRITANNIA', 'SHREECEM', 'JSWSTEEL', 'TATASTEEL', 'COALINDIA']
     };
 
     let stocks = marketData.filter(stock => 
@@ -310,11 +352,14 @@ export class AIInvestmentService {
       sum + (instrument.expectedReturn * instrument.allocation / 100), 0
     );
 
+    // Ensure returns are realistic (max 20% for any scenario)
+    const realisticReturn = Math.min(weightedReturn, 20);
+    
     // More realistic return calculations for Indian markets
     return {
-      conservative: Math.round((weightedReturn - 2) * 100) / 100, // More conservative
-      realistic: Math.round(weightedReturn * 100) / 100,
-      optimistic: Math.round((weightedReturn + 3) * 100) / 100, // Less optimistic
+      conservative: Math.round(Math.max(realisticReturn - 4, 6) * 100) / 100, // Conservative: 6-16%
+      realistic: Math.round(realisticReturn * 100) / 100, // Realistic: 8-20%
+      optimistic: Math.round(Math.min(realisticReturn + 4, 20) * 100) / 100, // Optimistic: 12-20%
     };
   }
 
